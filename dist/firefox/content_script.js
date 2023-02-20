@@ -13889,7 +13889,74 @@ var converter3 = globalThis.OpenCC.Converter({
       }));
     }
   }
+  getDeeplHackReqBody({ text, from, to }) {
+    const iCount = text.reduce((acc, cur) => acc + cur.split('i').length - 1, 0)
+    return {
+      id: this.getRandNum(),
+      jsonrpc: '2.0',
+      method: 'LMT_handle_texts',
+      params: {
+        timestamp: this.getTimeStamp(iCount),
+        splitting: 'newlines',
+        texts: text.map((t) => ({
+          text: t,
+          requestAlternatives: 3,
+        })),
+        lang: {
+          source_lang_user_selected: langMap8.get(from) || '',
+          target_lang: langMap8.get(to) || to
+        }
+      }
+    };
+  }
+  getRandNum() {
+    const rand = Math.floor(Math.random() * 99999) + 100000;
+    return rand * 1000;
+  }
+  getTimeStamp(iCount) {
+    const ts = Date.now();
+    if (iCount !== 0) {
+      iCount++;
+      return ts - (ts % iCount) + iCount;
+    }
+    return ts;
+  }
+
   async translateList(payload) {
+    if (this.authKey.toLowerCase() === 'hack') {
+      return await this.translateListHack(payload)
+    }
+    return await this.translateListOrig(payload)
+  }
+  async translateListHack(payload) {
+    const body = this.getDeeplHackReqBody(payload)
+    let bodyStr = JSON.stringify(body)
+    if ((body.id + 5) % 29 === 0 || (body.id + 3) % 13 === 0) {
+      bodyStr = bodyStr.replace('"method":"', '"method" : "');
+    } else {
+      bodyStr = bodyStr.replace('"method":"', '"method": "');
+    }
+    const resp = await request2({
+      method: 'POST',
+      url: 'https://www2.deepl.com/jsonrpc',
+      retry: 2,
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: bodyStr,
+    });
+    const targetTexts = resp?.result?.texts
+    if (targetTexts && targetTexts.length > 0) {
+      return {
+        text: targetTexts.map((t) => payload.to === "zh-TW" ? converter3(t.text) : t.text),
+        from: targetTexts[0] && langMapReverse2.get(targetTexts[0].detected_source_language) || payload.from,
+        to: payload.to,
+      };
+    } else {
+      throw new Error(JSON.stringify(resp));
+    }
+  }
+  async translateListOrig(payload) {
     let { from, to, text } = payload, bodyParams = {
       source_lang: langMap7.get(from) || "",
       target_lang: langMap7.get(to) || to
